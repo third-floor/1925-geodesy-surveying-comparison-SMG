@@ -239,52 +239,55 @@
         let schemaHTML = `
           <div class="panel mt-4">
             <h5>📑 Extracted Schema Fields (AI-Enhanced)</h5>
-
-            <div class="accordion" id="schemaAccordion">
         `;
 
+        let groupIndex = 0;
+
         for (const [group, fields] of Object.entries(schemaGroups)) {
-          const accordionId = `acc_${group.replace(/\s+/g,"_")}`;
+          groupIndex++;
+          const accId = `schemaAcc_${groupIndex}`;
 
           schemaHTML += `
-            <div class="accordion-item">
-              <h2 class="accordion-header" id="h_${accordionId}">
-                <button class="accordion-button collapsed" type="button"
-                        data-bs-toggle="collapse" data-bs-target="#${accordionId}">
-                  ${group}
-                </button>
-              </h2>
+            <div class="accordion mb-3" id="accordion_${accId}">
+              <div class="accordion-item">
+                <h2 class="accordion-header" id="h_${accId}">
+                  <button class="accordion-button collapsed" type="button"
+                          data-bs-toggle="collapse" data-bs-target="#${accId}">
+                    ${group}
+                  </button>
+                </h2>
 
-              <div id="${accordionId}" class="accordion-collapse collapse"
-                   data-bs-parent="#schemaAccordion">
-                <div class="accordion-body">
-          `;
+                <div id="${accId}" class="accordion-collapse collapse">
+                  <div class="accordion-body">
+        `;
 
-          if (!schema) {
-            schemaHTML += `<p class="text-muted">No schema data available.</p>`;
-          } else {
-            fields.forEach(f => {
-              let val = schema[f] || "";
-              if (typeof val === "string" && (val.startsWith("[")||val.startsWith("{"))) {
-                try { val = JSON.stringify(JSON.parse(val), null, 2); } catch {}
-              }
-              schemaHTML += `
-                <div class="schema-field-row">
-                  <strong>${f}</strong>
-                  <span style="white-space:pre-wrap">${val}</span>
-                </div>
-              `;
-            });
-          }
+        if (!schema) {
+          schemaHTML += `<p class="text-muted fst-italic">No schema data available.</p>`;
+        } else {
+          fields.forEach(f => {
+            let val = schema[f] || "";
+            if (typeof val === "string" && (val.startsWith("[")||val.startsWith("{"))) {
+              try { val = JSON.stringify(JSON.parse(val), null, 2); } catch {}
+            }
+            schemaHTML += `
+              <div class="schema-field-row">
+                <strong>${f}</strong>
+                <span style="white-space:pre-wrap;">${val}</span>
+              </div>
+            `;
+          });
+        }
 
-          schemaHTML += `
+        schemaHTML += `
                 </div>
               </div>
             </div>
-          `;
-        }
+          </div>
+        `;
+      }
 
-        schemaHTML += `</div></div>`;
+      schemaHTML += `</div>`;
+
 
         /* ---------- Schema charts ---------- */
         const schemaChartHTML = `
@@ -352,13 +355,53 @@
         new bootstrap.Modal(document.getElementById('compareModal')).show();
 
         /* ---------- Image fullscreen viewer ---------- */
+        const allFiles = recordsData.map(r => r["Filename"]).filter(f => f);
+        let currentIndex = allFiles.indexOf(rowData["Filename"]);
+
         document.getElementById("recordImage").onclick = () => {
+
           const overlay = document.createElement("div");
           overlay.id = "imgOverlay";
-          overlay.innerHTML = `<img src="pages/${rowData["Filename"]}">`;
-          overlay.onclick = () => overlay.remove();
+
+          overlay.innerHTML = `
+            <img id="overlayImg" src="pages/${allFiles[currentIndex]}">
+            <button id="prevImg" class="btn btn-light position-absolute top-50 start-0 translate-middle-y ms-3">⟨</button>
+            <button id="nextImg" class="btn btn-light position-absolute top-50 end-0 translate-middle-y me-3">⟩</button>
+          `;
+
           document.body.appendChild(overlay);
+
+          const updateImg = () => {
+            document.getElementById("overlayImg").src = "pages/" + allFiles[currentIndex];
+          };
+
+          document.getElementById("prevImg").onclick = (e) => {
+            e.stopPropagation();
+            currentIndex = (currentIndex - 1 + allFiles.length) % allFiles.length;
+            updateImg();
+          };
+
+          document.getElementById("nextImg").onclick = (e) => {
+            e.stopPropagation();
+            currentIndex = (currentIndex + 1) % allFiles.length;
+            updateImg();
+          };
+
+          overlay.onclick = (e) => {
+            if (e.target.id === "imgOverlay") overlay.remove();
+          };
+
+          document.addEventListener("keydown", function escListener(e) {
+            if (!document.body.contains(overlay)) {
+              document.removeEventListener("keydown", escListener);
+              return;
+            }
+            if (e.key === "Escape") overlay.remove();
+            if (e.key === "ArrowLeft") document.getElementById("prevImg").click();
+            if (e.key === "ArrowRight") document.getElementById("nextImg").click();
+          });
         };
+
 
         /* ---------- Comparison spider chart ---------- */
         if (comp) {
