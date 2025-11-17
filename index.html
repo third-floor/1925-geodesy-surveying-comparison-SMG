@@ -36,7 +36,7 @@
       box-shadow: 0 0 8px rgba(0,0,0,0.05);
       min-width: 280px;
     }
-    .panel h5 {
+    .panel h5, .panel h6 {
       border-bottom: 2px solid #007bff33;
       padding-bottom: .5rem;
       margin-bottom: 1rem;
@@ -51,10 +51,23 @@
     }
     .field-row strong {
       color: #333;
-      width: 45%;
+      width: 40%;
       word-break: break-word;
     }
-    #spiderChartContainer {
+    .schema-field-row {
+      border-bottom: 1px dashed #ddd;
+      padding: 0.35rem 0;
+      font-size: 0.92rem;
+      display: flex;
+      justify-content: space-between;
+    }
+    .schema-field-row strong {
+      width: 35%;
+      color: #222;
+    }
+    #spiderChartContainer,
+    #schemaSpiderPresenceContainer,
+    #schemaSpiderQuantityContainer {
       width: 100%;
       max-width: 600px;
       height: 400px;
@@ -62,9 +75,9 @@
       text-align: center;
       position: relative;
     }
-    #spiderChart {
-      width: 100%;
-      height: 100%;
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
     }
     footer {
       text-align: center;
@@ -78,9 +91,6 @@
       }
       .panel {
         flex: 1 1 100%;
-      }
-      #spiderChartContainer {
-        height: 300px;
       }
     }
   </style>
@@ -115,15 +125,20 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    document.addEventListener('DOMContentLoaded', async function() {
+  document.addEventListener('DOMContentLoaded', async function() {
       console.log("📂 Loading datasets...");
 
-      const [recordsData, comparisonData] = await Promise.all([
-        new Promise(res => Papa.parse('matched_records.csv', {download: true, header: true, complete: r => res(r.data.filter(d => Object.keys(d).length > 1))})),
-        new Promise(res => Papa.parse('entity_comparison_results.csv', {download: true, header: true, complete: r => res(r.data.filter(d => Object.keys(d).length > 1))}))
+      const [recordsData, comparisonData, schemaData] = await Promise.all([
+        new Promise(res => Papa.parse('matched_records.csv', {download: true, header: true, complete: r => res(r.data)})),
+        new Promise(res => Papa.parse('entity_comparison_results.csv', {download: true, header: true, complete: r => res(r.data)})),
+        new Promise(res => Papa.parse('1925_geodesy_schema_extraction.csv', {download: true, header: true, complete: r => res(r.data)}))
       ]);
 
-      // ---- Custom sorting for Catalogue number ----
+      recordsData = recordsData.filter(d => Object.keys(d).length > 1);
+      comparisonData = comparisonData.filter(d => Object.keys(d).length > 1);
+      schemaData = schemaData.filter(d => Object.keys(d).length > 1);
+
+      // Custom sorting
       jQuery.extend(jQuery.fn.dataTable.ext.type.order, {
         "catalogue-pre": function (data) {
           const num = parseFloat(String(data).replace(/[^\d.]/g, ''));
@@ -163,85 +178,129 @@
         "uid", "identifier", "title", "description", "category",
         "material", "object_name", "date", "place", "maker", "image"
       ];
-      const metrics = ["ObjectNames", "Makers", "Organisations/institutions", "Dates", "Places", "Descriptions", "Other"];
+
+      const entityMetrics = [
+        "ObjectNames", "Makers", "Organisations/institutions", "Dates",
+        "Places", "Descriptions", "Other"
+      ];
+
+      const schemaFields = [
+        "object_number","secondary_identifier","whole_or_part","item_count","collection","legal_status",
+        "object_name","description","location",
+        "hazards","makers_and_associated_people","place_made","date_made",
+        "materials","measurements","interpretation","interpretation_source","interpretation_date"
+      ];
 
       let activeChart = null;
+      let activeSchemaPresenceChart = null;
+      let activeSchemaQuantityChart = null;
 
+      /* ---------------------- Row click behaviour ---------------------- */
       $('#recordsTable tbody').on('click', 'tr', function() {
         const rowData = table.row(this).data();
-        if (!rowData) return;
-
         const idx = table.row(this).index();
-        const comp = comparisonData.find(r => Number(r.RowIndex) === idx);
 
+        const comp = comparisonData.find(r => Number(r.RowIndex) === idx);
+        const schema = schemaData.find(r => Number(r.RowIndex) === idx);
+
+        /* ---------------------- Build Standard Panels ---------------------- */
         const chartHTML = `
           <div id="spiderChartContainer">
             <canvas id="spiderChart"></canvas>
-            <button id="downloadChart" class="btn btn-outline-secondary btn-sm mt-2">⬇️ Download Chart</button>
+            <button id="downloadChart" class="btn btn-outline-secondary btn-sm mt-2">⬇️ Download Comparison Chart</button>
           </div>
         `;
 
-        // Aeronautics panel
-        let leftHTML = `<div class="panel"><h5>📘 Geodesy and Surveying catalogue 1925</h5>`;
+        let leftHTML = `<div class="panel"><h5>📘 Geodesy and Surveying Catalogue 1925</h5>`;
         aeronauticsFields.forEach(k => {
           if (k in rowData)
             leftHTML += `<div class="field-row"><strong>${k}</strong><span>${rowData[k] || ''}</span></div>`;
         });
 
-        // Unique Aeronautics
-        if (comp && comp.Unique_to_Meteorology) {
+        // Unique fields
+        if (comp?.Unique_to_Meteorology) {
           try {
-            const cleaned = comp.Unique_to_Meteorology.replace(/[\r\n]+/g, ' ');
-            const unique = JSON.parse(cleaned);
-            leftHTML += `<div class="mt-3"><h6>🌿 Unique to Geodesy and Surveying Catalogue</h6>`;
-            for (const [category, list] of Object.entries(unique)) {
-              if (Array.isArray(list) && list.length > 0)
-                leftHTML += `<div><strong>${category}:</strong> ${list.join(', ')}</div>`;
-            }
+            const unique = JSON.parse(comp.Unique_to_Meteorology);
+            leftHTML += `<div class="mt-3"><h6>🌿 Unique to G&S Catalogue</h6>`;
+            for (const [cat, list] of Object.entries(unique))
+              if (list?.length)
+                leftHTML += `<div><strong>${cat}:</strong> ${list.join(', ')}</div>`;
             leftHTML += `</div>`;
-          } catch (e) {
-            console.warn("⚠️ Could not parse Unique_to_Meteorology:", e);
-          }
+          } catch {}
         }
         leftHTML += `</div>`;
 
-        // SMG panel
         let rightHTML = `<div class="panel"><h5>🏛️ Science Museum Group Collections Online</h5>`;
         smgFields.forEach(k => {
           if (k in rowData) {
             let val = rowData[k] || '';
-
-            if (k === 'image' && val) {
+            if (k === 'image' && val)
               val = `<a href="${val}" target="_blank">View image 🔗</a>`;
-            }
-
-            if (k === 'uid' && val) {
-              const baseUrl = 'https://collection.sciencemuseumgroup.org.uk/objects/';
-              val = `<a href="${baseUrl}${val}" target="_blank">${val}</a>`;
-            }
-
+            if (k === 'uid' && val)
+              val = `<a href="https://collection.sciencemuseumgroup.org.uk/objects/${val}" target="_blank">${val}</a>`;
             rightHTML += `<div class="field-row"><strong>${k}</strong><span>${val}</span></div>`;
           }
         });
 
-        // Unique SMG
-        if (comp && comp.Unique_to_SMG) {
+        if (comp?.Unique_to_SMG) {
           try {
-            const cleaned = comp.Unique_to_SMG.replace(/[\r\n]+/g, ' ');
-            const unique = JSON.parse(cleaned);
-            rightHTML += `<div class="mt-3"><h6>🏺 Unique to Science Museum Group</h6>`;
-            for (const [category, list] of Object.entries(unique)) {
-              if (Array.isArray(list) && list.length > 0)
-                rightHTML += `<div><strong>${category}:</strong> ${list.join(', ')}</div>`;
-            }
+            const unique = JSON.parse(comp.Unique_to_SMG);
+            rightHTML += `<div class="mt-3"><h6>🏺 Unique to SMG</h6>`;
+            for (const [cat, list] of Object.entries(unique))
+              if (list?.length)
+                rightHTML += `<div><strong>${cat}:</strong> ${list.join(', ')}</div>`;
             rightHTML += `</div>`;
-          } catch (e) {
-            console.warn("⚠️ Could not parse Unique_to_SMG:", e);
-          }
+          } catch {}
         }
         rightHTML += `</div>`;
 
-        // Modal HTML
+        /* ---------------------- New Schema Panel ---------------------- */
+        let schemaHTML = `
+          <div class="panel mt-4">
+            <h5>📑 Extracted Schema Fields (AI-Enhanced Record)</h5>
+        `;
+
+        if (!schema) {
+          schemaHTML += `<p class="text-muted fst-italic">No extracted schema data for this record.</p>`;
+        } else {
+          schemaFields.forEach(f => {
+            let val = schema[f] || null;
+
+            // Pretty-print arrays or JSON objects
+            if (typeof val === "string" && (val.startsWith("[") || val.startsWith("{"))) {
+              try { val = JSON.stringify(JSON.parse(val), null, 2); }
+              catch {}
+            }
+
+            schemaHTML += `
+              <div class="schema-field-row">
+                <strong>${f}</strong>
+                <span style="white-space:pre-wrap; text-align:left;">${val || ""}</span>
+              </div>
+            `;
+          });
+        }
+
+        schemaHTML += `</div>`;
+
+        /* ---------------------- Schema Spider Charts (Presence + Quantities) ---------------------- */
+        const schemaSpiderHTML = `
+          <div class="mt-4">
+            <h5 class="text-center mt-4">📊 Schema Entity Analysis</h5>
+
+            <div id="schemaSpiderPresenceContainer">
+              <canvas id="schemaSpiderPresence"></canvas>
+              <button id="downloadPresenceChart" class="btn btn-outline-secondary btn-sm mt-2">⬇️ Download Presence Chart</button>
+            </div>
+
+            <div id="schemaSpiderQuantityContainer" class="mt-4">
+              <canvas id="schemaSpiderQuantity"></canvas>
+              <button id="downloadQuantityChart" class="btn btn-outline-secondary btn-sm mt-2">⬇️ Download Quantity Chart</button>
+            </div>
+          </div>
+        `;
+
+        /* ---------------------- Modal ---------------------- */
         const modalHTML = `
           <div class="modal fade" id="compareModal" tabindex="-1">
             <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -250,16 +309,24 @@
                   <h5 class="modal-title">🔎 Compare Record</h5>
                   <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
+
                 <div class="modal-body text-center">
+
                   ${chartHTML}
+
                   <div class="dual-panel">${leftHTML + rightHTML}</div>
+
+                  ${schemaHTML}
+
+                  ${schemaSpiderHTML}
+
                   <div class="mt-4">
                     <h6>🖼️ Related Image</h6>
                     <img id="recordImage" src="pages/${rowData["Filename"]}" 
-                         alt="${rowData["Object name"] || ''}" 
                          class="img-fluid rounded shadow-sm" 
                          style="max-height:400px; cursor:pointer;">
                   </div>
+
                 </div>
               </div>
             </div>
@@ -268,127 +335,121 @@
 
         $('#compareModal').remove();
         $('body').append(modalHTML);
+
         const modal = new bootstrap.Modal(document.getElementById('compareModal'));
         modal.show();
 
-        // destroy chart when modal closes
-        document.getElementById('compareModal').addEventListener('hidden.bs.modal', () => {
-          if (activeChart) {
-            activeChart.destroy();
-            activeChart = null;
-          }
-        });
-
-        // Radar chart
-        const ctx = document.getElementById('spiderChart');
+        /* ---------------------- Build Main Spider Chart ---------------------- */
         if (comp) {
-          const meteorologyValues = metrics.map(m => {
-            const key = `Meteorology_${m}`.replace(/\//g, '_');
-            return Number(comp[key] || 0);
-          });
-          const smgValues = metrics.map(m => {
-            const key = `SMG_${m}`.replace(/\//g, '_');
-            return Number(comp[key] || 0);
-          });
+          const ctx = document.getElementById('spiderChart');
+
+          const meteorologyValues = entityMetrics.map(m => Number(comp[`Meteorology_${m}`] || 0));
+          const smgValues = entityMetrics.map(m => Number(comp[`SMG_${m}`] || 0));
           const entryMax = Math.max(...meteorologyValues, ...smgValues, 1);
 
           activeChart = new Chart(ctx, {
             type: 'radar',
             data: {
-              labels: metrics,
+              labels: entityMetrics,
               datasets: [
                 {
-                  label: 'Geodesy and Surveying Catalogue',
+                  label: "Geodesy 1925",
                   data: meteorologyValues,
-                  backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                  borderColor: 'rgba(54, 162, 235, 1)',
-                  borderWidth: 2,
-                  pointRadius: 3
+                  backgroundColor: "rgba(54,162,235,0.2)",
+                  borderColor: "rgba(54,162,235,1)",
+                  borderWidth: 2
                 },
                 {
-                  label: 'Science Museum Group',
+                  label: "Science Museum Group",
                   data: smgValues,
-                  backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                  borderColor: 'rgba(255, 99, 132, 1)',
-                  borderWidth: 2,
-                  pointRadius: 3
+                  backgroundColor: "rgba(255,99,132,0.2)",
+                  borderColor: "rgba(255,99,132,1)",
+                  borderWidth: 2
                 }
               ]
             },
             options: {
-              responsive: false,
-              maintainAspectRatio: false,
-              plugins: {
-                tooltip: { enabled: false },
-                legend: { position: 'bottom', labels: { font: { size: 12 } } },
-                title: { display: true, text: 'Information Richness Comparison', font: { size: 14 } }
-              },
               scales: {
-                r: {
-                  beginAtZero: true,
-                  max: entryMax + 1,
-                  ticks: { stepSize: Math.ceil(entryMax / 4), color: '#555', backdropColor: 'transparent' },
-                  grid: { color: '#ddd' },
-                  angleLines: { color: '#ccc' }
-                }
-              },
-              animation: false
+                r: { beginAtZero: true, max: entryMax + 1 }
+              }
+            }
+          });
+        }
+
+        /* ---------------------- Schema Presence Chart ---------------------- */
+        if (schema) {
+          const presenceCtx = document.getElementById('schemaSpiderPresence');
+          const quantityCtx = document.getElementById('schemaSpiderQuantity');
+
+          const presenceValues = schemaFields.map(f => schema[f] ? 1 : 0);
+          const quantityValues = schemaFields.map(f => {
+            const v = schema[f];
+            if (!v) return 0;
+            if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
+              try {
+                const parsed = JSON.parse(v);
+                if (Array.isArray(parsed)) return parsed.length;
+                if (typeof parsed === "object") return Object.keys(parsed).length;
+              } catch {}
+            }
+            return 1;
+          });
+
+          const maxQ = Math.max(...quantityValues, 1);
+
+          activeSchemaPresenceChart = new Chart(presenceCtx, {
+            type: 'radar',
+            data: {
+              labels: schemaFields,
+              datasets: [{
+                label: "Presence (1 = present)",
+                data: presenceValues,
+                backgroundColor: "rgba(46,204,113,0.2)",
+                borderColor: "rgba(46,204,113,1)",
+                borderWidth: 2
+              }]
+            },
+            options: {
+              scales: { r: { beginAtZero: true, max: 1 } }
             }
           });
 
-          document.getElementById('downloadChart').addEventListener('click', () => {
-            const link = document.createElement('a');
-            link.download = `${rowData["Object name"] || "comparison"}.png`;
-            link.href = activeChart.toBase64Image();
-            link.click();
+          activeSchemaQuantityChart = new Chart(quantityCtx, {
+            type: 'radar',
+            data: {
+              labels: schemaFields,
+              datasets: [{
+                label: "Quantity (number of values)",
+                data: quantityValues,
+                backgroundColor: "rgba(155,89,182,0.2)",
+                borderColor: "rgba(155,89,182,1)",
+                borderWidth: 2
+              }]
+            },
+            options: {
+              scales: { r: { beginAtZero: true, max: maxQ + 1 } }
+            }
           });
-        } else {
-          ctx.parentElement.innerHTML = "<p class='text-muted fst-italic'>⚠️ No comparison data found for this record.</p>";
-        }
 
-        // ---- Image fullscreen + navigation ----
-        const allFiles = recordsData.map(r => r["Filename"]).filter(f => f);
-        let currentIndex = allFiles.indexOf(rowData["Filename"]);
-
-        $('#recordImage').on('click', function() {
-          const overlay = $(`
-            <div id="imgOverlay" style="
-              position:fixed;top:0;left:0;width:100%;height:100%;
-              background:rgba(0,0,0,0.9);z-index:9999;
-              display:flex;align-items:center;justify-content:center;">
-              <img id="overlayImg" src="pages/${allFiles[currentIndex]}" 
-                   style="max-width:90%;max-height:90%;border-radius:10px;">
-              <button id="prevImg" class="btn btn-light position-absolute top-50 start-0 translate-middle-y ms-3">⟨</button>
-              <button id="nextImg" class="btn btn-light position-absolute top-50 end-0 translate-middle-y me-3">⟩</button>
-            </div>
-          `).appendTo('body');
-
-          const updateImg = () => {
-            $('#overlayImg').attr('src', `pages/${allFiles[currentIndex]}`);
+          // downloads
+          document.getElementById("downloadPresenceChart").onclick = () => {
+            const link = document.createElement('a');
+            link.download = "schema_presence_chart.png";
+            link.href = activeSchemaPresenceChart.toBase64Image();
+            link.click();
           };
 
-          $('#prevImg').on('click', () => {
-            currentIndex = (currentIndex - 1 + allFiles.length) % allFiles.length;
-            updateImg();
-          });
+          document.getElementById("downloadQuantityChart").onclick = () => {
+            const link = document.createElement('a');
+            link.download = "schema_quantity_chart.png";
+            link.href = activeSchemaQuantityChart.toBase64Image();
+            link.click();
+          };
+        }
 
-          $('#nextImg').on('click', () => {
-            currentIndex = (currentIndex + 1) % allFiles.length;
-            updateImg();
-          });
+      }); // end row click handler
 
-          $('#imgOverlay').on('click', e => {
-            if (e.target.id === 'imgOverlay') $('#imgOverlay').remove();
-          });
-
-          $(document).on('keydown.overlay', e => {
-            if (e.key === 'Escape') $('#imgOverlay').remove();
-            if (e.key === 'ArrowLeft') $('#prevImg').click();
-            if (e.key === 'ArrowRight') $('#nextImg').click();
-          });
-        });
-      });
-    });
+  }); // end DOMContentLoaded
   </script>
 </body>
 </html>
