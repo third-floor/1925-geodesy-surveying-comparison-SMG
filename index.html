@@ -331,6 +331,40 @@
                   </div>
 
                   <div class="dual-panel">${leftHTML + rightHTML}</div>
+                  
+                  <div class="dual-panel mt-3">
+
+                    <div class="panel">
+                      <h6>🌿 Unique to Geodesy & Surveying Catalogue</h6>
+                      ${(() => {
+                        if (!comp?.Unique_to_Meteorology) return "<p class='text-muted'>None</p>";
+                          let html = "";
+                          try {
+                          const uniq = JSON.parse(comp.Unique_to_Meteorology);
+                          for (const [cat, list] of Object.entries(uniq)) {
+                            if (list?.length) html += `<div><strong>${cat}:</strong> ${list.join(", ")}</div>`;
+                          }
+                        } catch {}
+                        return html || "<p class='text-muted'>None</p>";
+                      })()}
+                    </div>
+
+                    <div class="panel">
+                      <h6>🏺 Unique to Science Museum Group</h6>
+                      ${(() => {
+                        if (!comp?.Unique_to_SMG) return "<p class='text-muted'>None</p>";
+                        let html = "";
+                        try {
+                          const uniq = JSON.parse(comp.Unique_to_SMG);
+                          for (const [cat, list] of Object.entries(uniq)) {
+                            if (list?.length) html += `<div><strong>${cat}:</strong> ${list.join(", ")}</div>`;
+                          }
+                        } catch {}
+                        return html || "<p class='text-muted'>None</p>";
+                      })()}
+                    </div>
+
+                  </div>
 
                   ${schemaHTML}
 
