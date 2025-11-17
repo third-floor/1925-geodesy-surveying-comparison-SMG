@@ -128,15 +128,25 @@
   document.addEventListener('DOMContentLoaded', async function() {
       console.log("📂 Loading datasets...");
 
-      const [recordsData, comparisonData, schemaData] = await Promise.all([
-        new Promise(res => Papa.parse('matched_records.csv', {download: true, header: true, complete: r => res(r.data)})),
-        new Promise(res => Papa.parse('entity_comparison_results.csv', {download: true, header: true, complete: r => res(r.data)})),
-        new Promise(res => Papa.parse('1925_geodesy_schema_extraction.csv', {download: true, header: true, complete: r => res(r.data)}))
+      let [recordsData, comparisonData, schemaData] = await Promise.all([
+        new Promise(res => Papa.parse('matched_records.csv', {
+            download: true, header: true,
+            complete: r => res(r.data)
+        })),
+        new Promise(res => Papa.parse('entity_comparison_results.csv', {
+            download: true, header: true,
+            complete: r => res(r.data)
+        })),
+        new Promise(res => Papa.parse('1925_geodesy_schema_extraction.csv', {
+            download: true, header: true,
+            complete: r => res(r.data)
+        }))
       ]);
 
       recordsData = recordsData.filter(d => Object.keys(d).length > 1);
       comparisonData = comparisonData.filter(d => Object.keys(d).length > 1);
       schemaData = schemaData.filter(d => Object.keys(d).length > 1);
+
 
       // Custom sorting
       jQuery.extend(jQuery.fn.dataTable.ext.type.order, {
